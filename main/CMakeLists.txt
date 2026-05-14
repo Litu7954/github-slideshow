@@ -1,0 +1,21 @@
+idf_component_register(
+    SRCS
+        "../src/main.c"
+        "../src/core/task_manager.c"
+        "../src/protocols/uart_driver.c"
+        "../src/protocols/spi_driver.c"
+        "../src/protocols/i2c_driver.c"
+        "../src/protocols/can_driver.c"
+        "../src/protocols/pwm_driver.c"
+        "../src/protocols/modbus_driver.c"
+        "../src/protocols/protocol_registry.c"
+        "../src/injection/signal_injector.c"
+        "../src/analysis/signal_analyzer.c"
+        "../src/fault/fault_injector.c"
+        "../src/testing/loopback_tester.c"
+        "../src/ui/web_server.c"
+    INCLUDE_DIRS
+        "../include"
+    EMBED_FILES
+        "../data/index.html"
+)

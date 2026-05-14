@@ -1,4 +1,12 @@
-_site/
-.sass-cache/
-.jekyll-metadata
-.bundle
+.pio/
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+__pycache__/
+*.pyc
+.vscode/
+*.swp
+*.swo
+*~

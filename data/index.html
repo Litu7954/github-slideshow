@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 Signal Injector</title>
+<style>
+:root { --bg: #1a1a2e; --card: #16213e; --accent: #0f3460; --hi: #e94560; --text: #eee; --dim: #888; --ok: #4caf50; --warn: #ff9800; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+.header { background: var(--accent); padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--hi); }
+.header h1 { font-size: 1.2em; }
+.header .status { font-size: 0.85em; color: var(--dim); }
+.status .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+.dot.on { background: var(--ok); } .dot.off { background: var(--hi); }
+.container { display: grid; grid-template-columns: 280px 1fr; gap: 0; min-height: calc(100vh - 50px); }
+.sidebar { background: var(--card); padding: 16px; border-right: 1px solid #333; }
+.sidebar h3 { font-size: 0.9em; color: var(--dim); text-transform: uppercase; margin: 16px 0 8px; letter-spacing: 1px; }
+.sidebar h3:first-child { margin-top: 0; }
+.nav-btn { display: block; width: 100%; padding: 10px 12px; margin: 4px 0; background: transparent; color: var(--text); border: 1px solid #333; border-radius: 6px; cursor: pointer; text-align: left; font-size: 0.9em; transition: all 0.2s; }
+.nav-btn:hover { background: var(--accent); border-color: var(--hi); }
+.nav-btn.active { background: var(--accent); border-color: var(--hi); color: var(--hi); }
+.main { padding: 20px; overflow-y: auto; }
+.card { background: var(--card); border-radius: 8px; padding: 16px; margin-bottom: 16px; border: 1px solid #333; }
+.card h2 { font-size: 1em; margin-bottom: 12px; color: var(--hi); }
+.row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.col { flex: 1; min-width: 200px; }
+select, input, button { padding: 8px 12px; border: 1px solid #444; border-radius: 4px; background: var(--bg); color: var(--text); font-size: 0.9em; }
+select { width: 100%; }
+button { cursor: pointer; background: var(--accent); border-color: var(--hi); transition: all 0.2s; }
+button:hover { background: var(--hi); }
+button.stop { background: #c62828; border-color: #e53935; }
+label { display: block; font-size: 0.8em; color: var(--dim); margin-bottom: 4px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.stat { text-align: center; padding: 12px; background: var(--bg); border-radius: 6px; }
+.stat .val { font-size: 1.5em; font-weight: bold; color: var(--hi); }
+.stat .lbl { font-size: 0.75em; color: var(--dim); margin-top: 4px; }
+.log { background: #000; border-radius: 4px; padding: 8px; font-family: monospace; font-size: 0.8em; max-height: 300px; overflow-y: auto; color: #0f0; line-height: 1.5; }
+.log .err { color: var(--hi); } .log .warn { color: var(--warn); }
+.panel { display: none; } .panel.active { display: block; }
+input[type=range] { width: 100%; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; }
+.badge.ok { background: var(--ok); color: #fff; }
+.badge.err { background: var(--hi); color: #fff; }
+.proto-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.proto-btn { padding: 12px 8px; text-align: center; border: 1px solid #444; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.8em; }
+.proto-btn:hover { border-color: var(--hi); background: var(--accent); }
+.proto-btn.sel { border-color: var(--hi); background: var(--hi); color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>ESP32 Multi-Protocol Signal Injector</h1>
+  <div class="status"><span class="dot on" id="statusDot"></span><span id="statusText">Connected</span></div>
+</div>
+
+<div class="container">
+  <div class="sidebar">
+    <h3>Protocol</h3>
+    <div class="proto-grid" id="protoGrid">
+      <div class="proto-btn" data-proto="1" onclick="selectProto(1)">UART</div>
+      <div class="proto-btn" data-proto="2" onclick="selectProto(2)">SPI</div>
+      <div class="proto-btn" data-proto="3" onclick="selectProto(3)">I2C</div>
+      <div class="proto-btn" data-proto="4" onclick="selectProto(4)">RS-232</div>
+      <div class="proto-btn" data-proto="5" onclick="selectProto(5)">RS-485</div>
+      <div class="proto-btn" data-proto="6" onclick="selectProto(6)">CAN</div>
+      <div class="proto-btn" data-proto="8" onclick="selectProto(8)">Modbus</div>
+      <div class="proto-btn" data-proto="11" onclick="selectProto(11)">PWM</div>
+      <div class="proto-btn" data-proto="12" onclick="selectProto(12)">GPIO</div>
+    </div>
+    <h3>Function</h3>
+    <button class="nav-btn active" onclick="showPanel('inject',this)">Signal Injection</button>
+    <button class="nav-btn" onclick="showPanel('analyze',this)">Signal Analysis</button>
+    <button class="nav-btn" onclick="showPanel('fault',this)">Fault Injection</button>
+    <button class="nav-btn" onclick="showPanel('test',this)">Loopback / BER</button>
+    <button class="nav-btn" onclick="showPanel('waveform',this)">Waveform Gen</button>
+    <button class="nav-btn" onclick="showPanel('gpio',this)">GPIO Control</button>
+    <h3>Info</h3>
+    <div style="font-size:0.8em;color:var(--dim)">
+      <div>Packets: <span id="pktCount">0</span></div>
+      <div>Mode: <span id="modeText">Idle</span></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <!-- Signal Injection Panel -->
+    <div class="panel active" id="panel-inject">
+      <div class="card">
+        <h2>Signal Injection</h2>
+        <div class="row">
+          <div class="col">
+            <label>Test Pattern</label>
+            <select id="injectPattern">
+              <option value="0">Walking Ones</option>
+              <option value="1">PRBS-15</option>
+              <option value="2">Counter (0-255)</option>
+            </select>
+          </div>
+          <div class="col">
+            <label>Repeat Count</label>
+            <input type="number" id="injectCount" value="1" min="1" max="10000">
+          </div>
+        </div>
+        <div class="row">
+          <button onclick="sendPattern()">Send Pattern</button>
+          <button onclick="startInject()">Start Continuous</button>
+          <button class="stop" onclick="stopInject()">Stop</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Custom Data</h2>
+        <div class="row">
+          <div class="col" style="flex:3">
+            <label>Hex Data (space-separated)</label>
+            <input type="text" id="customHex" placeholder="01 02 03 04 FF" style="width:100%">
+          </div>
+          <div class="col" style="flex:1">
+            <label>&nbsp;</label>
+            <button onclick="sendCustom()">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Signal Analysis Panel -->
+    <div class="panel" id="panel-analyze">
+      <div class="card">
+        <h2>Signal Capture & Analysis</h2>
+        <div class="row">
+          <div class="col">
+            <label>Capture Duration (ms)</label>
+            <input type="number" id="capDuration" value="5000" min="100" max="10000">
+          </div>
+          <div class="col">
+            <label>&nbsp;</label>
+            <button onclick="startCapture()">Start Capture</button>
+            <button class="stop" onclick="stopCapture()">Stop</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Captured Frames</h2>
+        <div class="grid-3" id="captureStats">
+          <div class="stat"><div class="val" id="totalFrames">0</div><div class="lbl">Total Frames</div></div>
+          <div class="stat"><div class="val" id="validFrames">0</div><div class="lbl">Valid</div></div>
+          <div class="stat"><div class="val" id="errorFrames">0</div><div class="lbl">Errors</div></div>
+        </div>
+        <div class="log" id="captureLog">Waiting for capture data...</div>
+      </div>
+      <div class="card">
+        <h2>Bus Scanner</h2>
+        <button onclick="scanI2C()">Scan I2C Bus</button>
+        <button onclick="scanModbus()">Scan Modbus</button>
+        <div class="log" id="scanLog" style="margin-top:8px">Ready to scan...</div>
+      </div>
+    </div>
+
+    <!-- Fault Injection Panel -->
+    <div class="panel" id="panel-fault">
+      <div class="card">
+        <h2>Fault Injection</h2>
+        <div class="grid-2">
+          <div>
+            <label>Fault Type</label>
+            <select id="faultType">
+              <option value="2">Bit Flip</option>
+              <option value="3">Delay</option>
+              <option value="4">Packet Drop</option>
+              <option value="5">CRC Corruption</option>
+              <option value="6">Noise</option>
+            </select>
+          </div>
+          <div>
+            <label>Probability / Value</label>
+            <input type="number" id="faultValue" value="0.01" step="0.01" min="0" max="1">
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button onclick="addFault()">Add Fault Rule</button>
+          <button onclick="startFault()">Start</button>
+          <button class="stop" onclick="stopFault()">Stop</button>
+          <button onclick="clearFaults()">Clear All</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Fault Statistics</h2>
+        <div class="grid-3" id="faultStats">
+          <div class="stat"><div class="val" id="fTotal">0</div><div class="lbl">Total Faults</div></div>
+          <div class="stat"><div class="val" id="fBitFlip">0</div><div class="lbl">Bit Flips</div></div>
+          <div class="stat"><div class="val" id="fDrops">0</div><div class="lbl">Drops</div></div>
+          <div class="stat"><div class="val" id="fDelays">0</div><div class="lbl">Delays</div></div>
+          <div class="stat"><div class="val" id="fCRC">0</div><div class="lbl">CRC Errors</div></div>
+          <div class="stat"><div class="val" id="fNoise">0</div><div class="lbl">Noise</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loopback / BER Panel -->
+    <div class="panel" id="panel-test">
+      <div class="card">
+        <h2>Loopback Test</h2>
+        <div class="grid-2">
+          <div>
+            <label>Packet Count</label>
+            <input type="number" id="testPackets" value="100" min="1" max="100000">
+          </div>
+          <div>
+            <label>Packet Size (bytes)</label>
+            <input type="number" id="testSize" value="32" min="1" max="256">
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button onclick="runLoopback()">Run Loopback</button>
+          <button class="stop" onclick="stopTest()">Stop</button>
+        </div>
+        <div class="grid-3" style="margin-top:12px" id="loopbackResult" hidden>
+          <div class="stat"><div class="val" id="lbTotal">0</div><div class="lbl">Total</div></div>
+          <div class="stat"><div class="val" id="lbErrors">0</div><div class="lbl">Errors</div></div>
+          <div class="stat"><div class="val" id="lbBER">0</div><div class="lbl">BER</div></div>
+          <div class="stat"><div class="val" id="lbThroughput">0</div><div class="lbl">Throughput</div></div>
+          <div class="stat"><div class="val" id="lbLatMin">0</div><div class="lbl">Min Latency</div></div>
+          <div class="stat"><div class="val" id="lbLatMax">0</div><div class="lbl">Max Latency</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>BER (Bit Error Rate) Test</h2>
+        <div class="row">
+          <div class="col">
+            <label>Duration (seconds)</label>
+            <input type="number" id="berDuration" value="10" min="1" max="3600">
+          </div>
+          <div class="col">
+            <label>&nbsp;</label>
+            <button onclick="runBER()">Run BER Test</button>
+          </div>
+        </div>
+        <div class="grid-3" style="margin-top:12px" id="berResult" hidden>
+          <div class="stat"><div class="val" id="berSent">0</div><div class="lbl">Bits Sent</div></div>
+          <div class="stat"><div class="val" id="berErrors">0</div><div class="lbl">Bit Errors</div></div>
+          <div class="stat"><div class="val" id="berRate">0</div><div class="lbl">BER</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Waveform Generator Panel -->
+    <div class="panel" id="panel-waveform">
+      <div class="card">
+        <h2>Waveform Generator (DAC Output)</h2>
+        <div class="grid-2">
+          <div>
+            <label>Waveform Type</label>
+            <select id="waveType">
+              <option value="1">Sine</option>
+              <option value="2">Square</option>
+              <option value="3">Triangle</option>
+              <option value="4">Sawtooth</option>
+              <option value="5">Noise</option>
+              <option value="6">Pulse</option>
+            </select>
+          </div>
+          <div>
+            <label>Frequency (Hz)</label>
+            <input type="number" id="waveFreq" value="1000" min="1" max="5000">
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <div class="col">
+            <label>Amplitude: <span id="ampVal">1.0</span></label>
+            <input type="range" id="waveAmp" min="0" max="1" step="0.01" value="1"
+                   oninput="document.getElementById('ampVal').textContent=this.value">
+          </div>
+          <div class="col">
+            <label>Duty Cycle: <span id="dutyVal">50</span>%</label>
+            <input type="range" id="waveDuty" min="0" max="100" value="50"
+                   oninput="document.getElementById('dutyVal').textContent=this.value">
+          </div>
+        </div>
+        <div class="row">
+          <button onclick="startWave()">Start</button>
+          <button class="stop" onclick="stopWave()">Stop</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- GPIO Control Panel -->
+    <div class="panel" id="panel-gpio">
+      <div class="card">
+        <h2>GPIO Digital Control</h2>
+        <div class="grid-3" id="gpioGrid">
+          <div class="stat">
+            <div class="lbl">GPIO 32</div>
+            <button onclick="setGPIO(32,1)">HIGH</button>
+            <button onclick="setGPIO(32,0)">LOW</button>
+            <button onclick="pulseGPIO(32)">PULSE</button>
+          </div>
+          <div class="stat">
+            <div class="lbl">GPIO 33</div>
+            <button onclick="setGPIO(33,1)">HIGH</button>
+            <button onclick="setGPIO(33,0)">LOW</button>
+            <button onclick="pulseGPIO(33)">PULSE</button>
+          </div>
+          <div class="stat">
+            <div class="lbl">GPIO 27 (PWM0)</div>
+            <button onclick="setGPIO(27,1)">HIGH</button>
+            <button onclick="setGPIO(27,0)">LOW</button>
+            <button onclick="pulseGPIO(27)">PULSE</button>
+          </div>
+          <div class="stat">
+            <div class="lbl">GPIO 14 (PWM1)</div>
+            <button onclick="setGPIO(14,1)">HIGH</button>
+            <button onclick="setGPIO(14,0)">LOW</button>
+            <button onclick="pulseGPIO(14)">PULSE</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>PWM Channels</h2>
+        <div class="grid-2">
+          <div>
+            <label>Channel 0 (GPIO 27) Duty: <span id="pwm0Val">0</span>%</label>
+            <input type="range" min="0" max="100" value="0" oninput="setPWM(0,this.value);document.getElementById('pwm0Val').textContent=this.value">
+          </div>
+          <div>
+            <label>Channel 1 (GPIO 14) Duty: <span id="pwm1Val">0</span>%</label>
+            <input type="range" min="0" max="100" value="0" oninput="setPWM(1,this.value);document.getElementById('pwm1Val').textContent=this.value">
+          </div>
+          <div>
+            <label>Channel 2 (GPIO 12) Duty: <span id="pwm2Val">0</span>%</label>
+            <input type="range" min="0" max="100" value="0" oninput="setPWM(2,this.value);document.getElementById('pwm2Val').textContent=this.value">
+          </div>
+          <div>
+            <label>Channel 3 (GPIO 13) Duty: <span id="pwm3Val">0</span>%</label>
+            <input type="range" min="0" max="100" value="0" oninput="setPWM(3,this.value);document.getElementById('pwm3Val').textContent=this.value">
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <div class="col">
+            <label>PWM Frequency (Hz)</label>
+            <input type="number" id="pwmFreq" value="1000" min="1" max="40000000">
+          </div>
+          <div class="col">
+            <label>&nbsp;</label>
+            <button onclick="setPWMFreq()">Set Frequency</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+
+function post(url, data) {
+  return fetch(API + url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) }).then(r => r.json());
+}
+
+function showPanel(id, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  if (btn) btn.classList.add('active');
+}
+
+function selectProto(proto) {
+  document.querySelectorAll('.proto-btn').forEach(b => b.classList.remove('sel'));
+  document.querySelector(`[data-proto="${proto}"]`).classList.add('sel');
+  post('/api/protocol', { protocol: proto });
+}
+
+function sendPattern() {
+  const pattern = parseInt(document.getElementById('injectPattern').value);
+  const count = parseInt(document.getElementById('injectCount').value);
+  post('/api/inject', { action: 2, pattern, count });
+}
+function startInject() { post('/api/inject', { action: 0 }); }
+function stopInject()  { post('/api/inject', { action: 1 }); }
+
+function sendCustom() {
+  const hex = document.getElementById('customHex').value;
+  const bytes = hex.split(/[\s,]+/).map(h => parseInt(h, 16)).filter(n => !isNaN(n));
+  post('/api/inject', { action: 2, pattern: 99, data: bytes });
+}
+
+function startCapture() {
+  const duration = parseInt(document.getElementById('capDuration').value);
+  post('/api/analyze', { action: 0, duration });
+  setTimeout(fetchCapture, duration + 500);
+}
+function stopCapture() { post('/api/analyze', { action: 1 }); setTimeout(fetchCapture, 500); }
+
+function fetchCapture() {
+  post('/api/analyze', { action: 2 }).then(data => {
+    if (data.stats) {
+      document.getElementById('totalFrames').textContent = data.stats.total;
+      document.getElementById('validFrames').textContent = data.stats.valid;
+      document.getElementById('errorFrames').textContent = data.stats.errors;
+    }
+    if (data.frames) {
+      const log = document.getElementById('captureLog');
+      log.innerHTML = data.frames.map(f =>
+        `<div class="${f.err ? 'err' : ''}">[${f.proto}] ${f.text}</div>`
+      ).join('') || 'No frames captured';
+    }
+  });
+}
+
+function scanI2C() {
+  document.getElementById('scanLog').textContent = 'Scanning I2C bus...';
+  post('/api/analyze', { action: 3 }).then(data => {
+    const log = document.getElementById('scanLog');
+    if (data.devices && data.devices.length > 0) {
+      log.innerHTML = 'Found devices at: ' + data.devices.join(', ');
+    } else {
+      log.textContent = 'No I2C devices found';
+    }
+  });
+}
+function scanModbus() { document.getElementById('scanLog').textContent = 'Modbus scan not yet implemented in UI'; }
+
+function addFault() {
+  const type = parseInt(document.getElementById('faultType').value);
+  const val = parseFloat(document.getElementById('faultValue').value);
+  post('/api/fault', { action: type, prob: val, rate: val, delay: Math.round(val * 1000000) });
+}
+function startFault() { post('/api/fault', { action: 0 }); }
+function stopFault()  { post('/api/fault', { action: 1 }); }
+function clearFaults() { post('/api/fault', { action: 6 }); updateFaultStats(); }
+
+function updateFaultStats() {
+  post('/api/fault', { action: 5 }).then(data => {
+    document.getElementById('fTotal').textContent = data.total || 0;
+    document.getElementById('fBitFlip').textContent = data.bit_flips || 0;
+    document.getElementById('fDrops').textContent = data.drops || 0;
+    document.getElementById('fDelays').textContent = data.delays || 0;
+    document.getElementById('fCRC').textContent = data.crc || 0;
+    document.getElementById('fNoise').textContent = data.noise || 0;
+  });
+}
+
+function runLoopback() {
+  const packets = parseInt(document.getElementById('testPackets').value);
+  const size = parseInt(document.getElementById('testSize').value);
+  post('/api/test', { action: 0, packets, size }).then(data => {
+    document.getElementById('loopbackResult').hidden = false;
+    document.getElementById('lbTotal').textContent = data.total_packets || 0;
+    document.getElementById('lbErrors').textContent = data.error_packets || 0;
+    document.getElementById('lbBER').textContent = (data.bit_error_rate || 0).toExponential(2);
+    document.getElementById('lbThroughput').textContent = Math.round(data.throughput_bps || 0) + ' bps';
+    document.getElementById('lbLatMin').textContent = (data.latency?.min_us || 0) + ' us';
+    document.getElementById('lbLatMax').textContent = (data.latency?.max_us || 0) + ' us';
+  });
+}
+function runBER() {
+  const duration = parseInt(document.getElementById('berDuration').value);
+  post('/api/test', { action: 1, duration }).then(data => {
+    document.getElementById('berResult').hidden = false;
+    document.getElementById('berSent').textContent = data.bits_sent || 0;
+    document.getElementById('berErrors').textContent = data.errors || 0;
+    document.getElementById('berRate').textContent = data.ber || '0';
+  });
+}
+function stopTest() { post('/api/test', { action: 2 }); }
+
+function startWave() {
+  const type = parseInt(document.getElementById('waveType').value);
+  const freq = parseFloat(document.getElementById('waveFreq').value);
+  const amp = parseFloat(document.getElementById('waveAmp').value);
+  post('/api/inject', { action: 3, type, freq, amp });
+}
+function stopWave() { post('/api/inject', { action: 4 }); }
+
+function setGPIO(pin, level) { post('/api/inject', { action: 5, pin, level }); }
+function pulseGPIO(pin) { post('/api/inject', { action: 6, pin, duration: 1000 }); }
+function setPWM(ch, duty) { post('/api/inject', { action: 7, channel: ch, duty: parseFloat(duty) }); }
+function setPWMFreq() {
+  const freq = parseInt(document.getElementById('pwmFreq').value);
+  post('/api/inject', { action: 8, freq });
+}
+
+/* Status polling */
+setInterval(() => {
+  fetch(API + '/api/status').then(r => r.json()).then(data => {
+    document.getElementById('pktCount').textContent = data.packets_sent || 0;
+    const modes = ['Idle','Inject','Analyze','Fault','Loopback','BER','Bridge','SigGen'];
+    document.getElementById('modeText').textContent = modes[data.mode] || 'Idle';
+    document.getElementById('statusDot').className = 'dot on';
+    document.getElementById('statusText').textContent = data.protocol_name + ' | ' + (modes[data.mode] || 'Idle');
+  }).catch(() => {
+    document.getElementById('statusDot').className = 'dot off';
+    document.getElementById('statusText').textContent = 'Disconnected';
+  });
+}, 2000);
+</script>
+</body>
+</html>
